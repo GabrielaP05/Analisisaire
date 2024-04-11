@@ -1,0 +1,61 @@
+import pandas as pd
+import requests
+import sqlite3
+from typing import Set
+
+def ej_1_cargar_datos_demograficos() -> pd.DataFrame:
+    url = "https://public.opendatasoft.com/explore/dataset/us-cities-demographics/download/?format=csv&timezone=Europe/Berlin&lang=en&use_labels_for_header=true&csv_separator=%3B"
+    data = pd.read_csv(url, sep=';')
+    # Eliminar columnas Race, Count y Number of Veterans
+    data = data.drop(columns=['Race', 'Count', 'Number of Veterans'])
+    # Eliminar filas duplicadas
+    data = data.drop_duplicates()
+    return data
+
+def obtener_calidad_aire(ciudad: str) -> dict:
+    api_url = f"https://api-ninjas.com/v1/airquality/?city={ciudad}"
+    response = requests.get(api_url)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return {}
+
+def ej_2_cargar_calidad_aire(ciudades: Set[str]) -> None:
+    calidad_aire = []
+    for ciudad in ciudades:
+        datos_aire = obtener_calidad_aire(ciudad)
+        if datos_aire:
+            calidad_aire.append({
+                'city': ciudad,
+                'CO': datos_aire['data']['CO'],
+                'NO2': datos_aire['data']['NO2'],
+                'O3': datos_aire['data']['O3'],
+                'SO2': datos_aire['data']['SO2'],
+                'PM2.5': datos_aire['data']['PM2.5'],
+                'PM10': datos_aire['data']['PM10'],
+                'overall_aqi': datos_aire['data']['overall_aqi']
+            })
+    calidad_aire_df = pd.DataFrame(calidad_aire)
+    calidad_aire_df.to_csv('ciudades.csv', index=False)
+
+# Ejecutar funciones
+demografia = ej_1_cargar_datos_demograficos()
+ciudades = set(demografia['City'].tolist())
+ej_2_cargar_calidad_aire(ciudades)
+
+# Crear base de datos SQLite y cargar datos
+conn = sqlite3.connect('demografia.db')
+demografia.to_sql('demografia', conn, if_exists='replace', index=False)
+calidad_aire = pd.read_csv('ciudades.csv')
+calidad_aire.to_sql('calidad_aire', conn, if_exists='replace', index=False)
+
+# Realizar análisis
+query = '''
+SELECT d.City, d.State, d.Total_Population, c.overall_aqi
+FROM demografia d
+JOIN calidad_aire c ON d.City = c.city
+ORDER BY d.Total_Population DESC
+LIMIT 10
+'''
+resultado = pd.read_sql_query(query, conn)
+print(resultado)
